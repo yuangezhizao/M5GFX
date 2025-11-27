@@ -32,6 +32,7 @@ namespace lgfx // This should not be changed to "m5gfx"
     , board_ArduinoNessoN1
     , board_M5CardputerADV
     , board_M5UnitC6L
+    , board_M5StickS3
 
 /// non display boards
     , board_M5AtomLite = 128

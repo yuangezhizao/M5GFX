@@ -1874,6 +1874,77 @@ The usage of each pin is as follows.
         for (auto pin: backup_pins) { pin.restore(); }
       }
 
+      if (board == 0 || board == board_t::board_M5StickS3)
+      {
+        gpio::pin_backup_t backup_pins[] = { GPIO_NUM_21, GPIO_NUM_39, GPIO_NUM_40, GPIO_NUM_41, GPIO_NUM_45, GPIO_NUM_47, GPIO_NUM_48 };
+
+        auto result = lgfx::gpio::command(
+          (const uint8_t[]) {
+          lgfx::gpio::command_mode_input_pulldown, GPIO_NUM_47,
+          lgfx::gpio::command_mode_input_pulldown, GPIO_NUM_48,
+          lgfx::gpio::command_read               , GPIO_NUM_47,
+          lgfx::gpio::command_read               , GPIO_NUM_48,
+          lgfx::gpio::command_end
+          }
+        );
+        if (result == 0x03) {
+
+          _pin_reset(GPIO_NUM_21, use_reset); // LCD RST
+          bus_cfg.pin_mosi = GPIO_NUM_39;
+          bus_cfg.pin_miso = (gpio_num_t)-1; //GPIO_NUM_NC;
+          bus_cfg.pin_sclk = GPIO_NUM_40;
+          bus_cfg.pin_dc   = GPIO_NUM_45;
+          bus_cfg.spi_mode = 0;
+          bus_cfg.spi_3wire = true;
+          bus_spi->config(bus_cfg);
+          bus_spi->init();
+          id = _read_panel_id(bus_spi, GPIO_NUM_41);
+          if ((id & 0xFB) == 0x81) // 0x81 or 0x85
+          { //  check panel (ST7789)
+            board = board_t::board_M5StickS3;
+            ESP_LOGI(LIBRARY_NAME, "[Autodetect] board_M5StickS3");
+            bus_spi->release();
+            bus_cfg.spi_host = SPI3_HOST;
+            bus_cfg.freq_write = 40000000;
+            bus_cfg.freq_read  = 16000000;
+            bus_spi->config(bus_cfg);
+            auto p = new Panel_ST7789();
+            p->bus(bus_spi);
+            {
+              auto cfg = p->config();
+              cfg.pin_cs = GPIO_NUM_41;
+              cfg.pin_rst = GPIO_NUM_21;
+              cfg.panel_width = 135;
+              cfg.panel_height = 240;
+              cfg.offset_x     = 52;
+              cfg.offset_y     = 40;
+              cfg.offset_rotation = 2;
+              cfg.readable = true;
+              cfg.invert = true;
+              cfg.bus_shared = false;
+              p->config(cfg);
+            }
+            _panel_last.reset(p);
+            _set_pwm_backlight(GPIO_NUM_38, 7, 44100, false, 0);
+  
+            static constexpr uint8_t py32pmic_i2c_addr = 0x6E;
+            lgfx::i2c::init(i2c_port, GPIO_NUM_47, GPIO_NUM_48);
+            uint8_t reg_tmp[8];
+            reg_tmp[3] = 0x04; // set read target = reg0x04
+            m5gfx::i2c::transactionWriteRead(i2c_port, py32pmic_i2c_addr, &reg_tmp[3], 1, &reg_tmp[4], 4, 100000);
+  // ::printf("PY32PMIC %02x %02x %02x %02x\n", reg_tmp[4], reg_tmp[5], reg_tmp[6], reg_tmp[7]);
+            reg_tmp[4] |= 0b00000100; // REG0x04 GPIO_MODE : gpio2 (PYG2_L3B_EN) set 1 (output mode)
+            reg_tmp[5] |= 0b00000100; // REG0x05 GPIO_OUT  : gpio2 (PYG2_L3B_EN) set 1 (HIGH)
+            reg_tmp[7] &= 0b11111011; // REG0x07 GPIO_DRV  : gpio2 (PYG2_L3B_EN) set 0 (push-pull)
+            m5gfx::i2c::transactionWrite(i2c_port, py32pmic_i2c_addr, &reg_tmp[3], 5, 100000);
+  
+            goto init_clear;
+          }
+          bus_spi->release();
+        }
+        for (auto pin: backup_pins) { pin.restore(); }
+      }
+
       break;
 
     default: break;
